@@ -3,6 +3,7 @@ package eventmgr
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -167,8 +168,17 @@ func (em *EventManager) Subscribe(ctx context.Context, ident string, filter func
 				em.log.Error("events playback", "err", err)
 			}
 
-			// TODO: send an error frame or something?
+			// Send an OutdatedCursor error frame so the consumer knows the cursor is unresolvable
 			// NOTE: not doing em.rmSubscriber(sub) here because it hasn't been added yet
+			select {
+			case out <- &stream.XRPCStreamEvent{
+				Error: &stream.ErrorFrame{
+					Error:   "OutdatedCursor",
+					Message: fmt.Sprintf("cursor %d could not be resolved: %s", *since, err),
+				},
+			}:
+			default:
+			}
 			close(out)
 			return
 		}
@@ -200,6 +210,15 @@ func (em *EventManager) Subscribe(ctx context.Context, ident string, filter func
 		}); err != nil {
 			if !errors.Is(err, ErrCaughtUp) {
 				em.log.Error("events playback", "err", err)
+				select {
+				case out <- &stream.XRPCStreamEvent{
+					Error: &stream.ErrorFrame{
+						Error:   "OutdatedCursor",
+						Message: fmt.Sprintf("cursor could not be resolved during gap-fill: %s", err),
+					},
+				}:
+				default:
+				}
 				return
 			}
 		}
