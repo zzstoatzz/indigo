@@ -29,6 +29,8 @@ func (s *SchemaDef) CheckSchema() error {
 		return v.CheckSchema()
 	case SchemaSubscription:
 		return v.CheckSchema()
+	case SchemaSpace:
+		return v.CheckSchema()
 	case SchemaPermissionSet:
 		return v.CheckSchema()
 	case SchemaPermission:
@@ -67,7 +69,7 @@ func (s *SchemaDef) CheckSchema() error {
 // Checks if def is of "parimary" type
 func (s *SchemaDef) IsPrimary() bool {
 	switch s.Inner.(type) {
-	case SchemaRecord, SchemaQuery, SchemaProcedure, SchemaSubscription, SchemaPermissionSet:
+	case SchemaRecord, SchemaQuery, SchemaProcedure, SchemaSubscription, SchemaSpace, SchemaPermissionSet:
 		return true
 	}
 	return false
@@ -218,6 +220,13 @@ func (s *SchemaDef) UnmarshalJSON(b []byte) error {
 		return nil
 	case "subscription":
 		v := new(SchemaSubscription)
+		if err = json.Unmarshal(b, v); err != nil {
+			return err
+		}
+		s.Inner = *v
+		return nil
+	case "space":
+		v := new(SchemaSpace)
 		if err = json.Unmarshal(b, v); err != nil {
 			return err
 		}
@@ -455,6 +464,58 @@ type SchemaPermissionSet struct {
 	Permissions []SchemaPermission `json:"permissions"`
 }
 
+// SchemaSpace declares the modality and default collections for a permissioned
+// data space. This type is currently specified by proposal 0016.
+type SchemaSpace struct {
+	Type        string            `json:"type"` // "space"
+	Description *string           `json:"description,omitempty"`
+	Key         string            `json:"key"`
+	Name        string            `json:"name"`
+	NameLang    map[string]string `json:"name:lang,omitempty"`
+	Collections []string          `json:"collections"`
+}
+
+func (s *SchemaSpace) CheckSchema() error {
+	if s.Type != "space" {
+		return fmt.Errorf("expected 'space' schema")
+	}
+	switch s.Key {
+	case "":
+		return fmt.Errorf("space key specifier is required")
+	case "tid", "nsid", "any":
+		// pass
+	default:
+		if !strings.HasPrefix(s.Key, "literal:") {
+			return fmt.Errorf("invalid space key specifier: %s", s.Key)
+		}
+	}
+	if count := uniseg.GraphemeClusterCount(s.Name); count < 1 || count > 64 {
+		return fmt.Errorf("space name must contain between 1 and 64 graphemes")
+	}
+	for lang, name := range s.NameLang {
+		if _, err := syntax.ParseLanguage(lang); err != nil {
+			return err
+		}
+		if count := uniseg.GraphemeClusterCount(name); count < 1 || count > 64 {
+			return fmt.Errorf("localized space name must contain between 1 and 64 graphemes")
+		}
+	}
+	if len(s.Collections) == 0 {
+		return fmt.Errorf("space requires at least one collection")
+	}
+	seen := make(map[string]struct{}, len(s.Collections))
+	for _, coll := range s.Collections {
+		if _, err := syntax.ParseNSID(coll); err != nil {
+			return fmt.Errorf("space collection: %w", err)
+		}
+		if _, ok := seen[coll]; ok {
+			return fmt.Errorf("duplicate space collection: %s", coll)
+		}
+		seen[coll] = struct{}{}
+	}
+	return nil
+}
+
 func (s *SchemaPermissionSet) CheckSchema() error {
 	if s.Type != "permission-set" {
 		return fmt.Errorf("expected 'permission-set' schema")
@@ -489,6 +550,10 @@ type SchemaPermission struct {
 	LXM        []string `json:"lxm,omitempty"`
 	Audience   string   `json:"aud,omitempty"`
 	InheritAud bool     `json:"inheritAud,omitempty"`
+	SpaceType  string   `json:"spaceType,omitempty"`
+	Authority  string   `json:"authority,omitempty"`
+	SKey       string   `json:"skey,omitempty"`
+	Manage     []string `json:"manage,omitempty"`
 }
 
 func (s *SchemaPermission) CheckSchema() error {
@@ -536,6 +601,45 @@ func (s *SchemaPermission) CheckSchema() error {
 		}
 		if s.Audience != "" && s.Audience != "*" {
 			return fmt.Errorf("rpc permission 'aud' can't have service DID in permission set")
+		}
+	case "space":
+		if s.SpaceType == "" || s.SpaceType == "*" {
+			return fmt.Errorf("space permission requires a concrete 'spaceType'")
+		}
+		if _, err := syntax.ParseNSID(s.SpaceType); err != nil {
+			return fmt.Errorf("space permission spaceType: %w", err)
+		}
+		if s.Authority != "" && s.Authority != "self" && s.Authority != "*" {
+			if _, err := syntax.ParseDID(s.Authority); err != nil {
+				return fmt.Errorf("space permission authority: %w", err)
+			}
+		}
+		if s.SKey != "" && s.SKey != "*" {
+			if _, err := syntax.ParseRecordKey(s.SKey); err != nil {
+				return fmt.Errorf("space permission skey: %w", err)
+			}
+		}
+		for _, coll := range s.Collection {
+			if coll == "*" {
+				continue
+			}
+			if _, err := syntax.ParseNSID(coll); err != nil {
+				return fmt.Errorf("space permission collection: %w", err)
+			}
+		}
+		for _, act := range s.Action {
+			switch act {
+			case "read_self", "read", "create", "update", "delete":
+			default:
+				return fmt.Errorf("space permission unsupported action: %s", act)
+			}
+		}
+		for _, op := range s.Manage {
+			switch op {
+			case "create", "update", "delete":
+			default:
+				return fmt.Errorf("space permission unsupported management operation: %s", op)
+			}
 		}
 	case "blob", "account", "identity":
 		return fmt.Errorf("%s permission not allowed in permission sets", s.Resource)
