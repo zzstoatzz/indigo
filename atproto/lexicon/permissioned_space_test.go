@@ -29,8 +29,8 @@ func TestPermissionedSpaceSchemas(t *testing.T) {
 				"type": "space",
 				"description": "A discussion forum",
 				"key": "any",
-				"name": "AtmoBoards Forum",
-				"name:lang": {"es": "Foro AtmoBoards"},
+				"title": "AtmoBoards Forum",
+				"title:lang": {"es": "Foro AtmoBoards"},
 				"collections": ["com.atmoboards.thread", "com.atmoboards.reply"]
 			}
 		}
@@ -38,6 +38,12 @@ func TestPermissionedSpaceSchemas(t *testing.T) {
 	if _, ok := space.Defs["main"].Inner.(SchemaSpace); !ok {
 		t.Fatalf("main definition is %T, want SchemaSpace", space.Defs["main"].Inner)
 	}
+
+	parseAndCheckSchema(t, `{
+		"lexicon": 1,
+		"id": "com.atmoboards.untitled",
+		"defs": {"main": {"type": "space", "key": "any", "collections": ["com.atmoboards.thread"]}}
+	}`)
 
 	permissions := parseAndCheckSchema(t, `{
 		"lexicon": 1,
@@ -72,7 +78,11 @@ func TestPermissionedSpaceSchemaValidation(t *testing.T) {
 	}{
 		{
 			name: "space without collections",
-			def:  SchemaDef{Inner: SchemaSpace{Type: "space", Key: "any", Name: "Empty"}},
+			def:  SchemaDef{Inner: SchemaSpace{Type: "space", Key: "any"}},
+		},
+		{
+			name: "space with an empty title",
+			def:  SchemaDef{Inner: SchemaSpace{Type: "space", Key: "any", Title: new(string), Collections: []string{"com.atmoboards.thread"}}},
 		},
 		{
 			name: "space permission with wildcard type",

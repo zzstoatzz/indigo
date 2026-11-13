@@ -470,8 +470,8 @@ type SchemaSpace struct {
 	Type        string            `json:"type"` // "space"
 	Description *string           `json:"description,omitempty"`
 	Key         string            `json:"key"`
-	Name        string            `json:"name"`
-	NameLang    map[string]string `json:"name:lang,omitempty"`
+	Title       *string           `json:"title,omitempty"`
+	TitleLang   map[string]string `json:"title:lang,omitempty"`
 	Collections []string          `json:"collections"`
 }
 
@@ -489,15 +489,17 @@ func (s *SchemaSpace) CheckSchema() error {
 			return fmt.Errorf("invalid space key specifier: %s", s.Key)
 		}
 	}
-	if count := uniseg.GraphemeClusterCount(s.Name); count < 1 || count > 64 {
-		return fmt.Errorf("space name must contain between 1 and 64 graphemes")
+	if s.Title != nil {
+		if count := uniseg.GraphemeClusterCount(*s.Title); count < 1 || count > 64 {
+			return fmt.Errorf("space title must contain between 1 and 64 graphemes")
+		}
 	}
-	for lang, name := range s.NameLang {
+	for lang, title := range s.TitleLang {
 		if _, err := syntax.ParseLanguage(lang); err != nil {
 			return err
 		}
-		if count := uniseg.GraphemeClusterCount(name); count < 1 || count > 64 {
-			return fmt.Errorf("localized space name must contain between 1 and 64 graphemes")
+		if count := uniseg.GraphemeClusterCount(title); count < 1 || count > 64 {
+			return fmt.Errorf("localized space title must contain between 1 and 64 graphemes")
 		}
 	}
 	if len(s.Collections) == 0 {
